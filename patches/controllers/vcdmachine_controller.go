@@ -206,9 +206,9 @@ func patchVCDMachine(ctx context.Context, patchHelper *patch.Helper, vcdMachine 
 }
 
 const (
-	NetworkConfiguration                   = "guestinfo.postcustomization.networkconfiguration.status"
-	ProxyConfiguration                     = "guestinfo.postcustomization.proxy.setting.status"
-	MeteringConfiguration                  = "guestinfo.metering.status"
+	NetworkConfiguration  = "guestinfo.postcustomization.networkconfiguration.status"
+	ProxyConfiguration    = "guestinfo.postcustomization.proxy.setting.status"
+	MeteringConfiguration = "guestinfo.metering.status"
 	// KubeadmInit                            = "guestinfo.postcustomization.kubeinit.status"
 	// KubeadmNodeJoin                        = "guestinfo.postcustomization.kubeadm.node.join.status"
 	PostCustomizationScriptExecutionStatus = "guestinfo.post_customization_script_execution_status"
@@ -1558,6 +1558,7 @@ func MergeJinjaToCloudInitScript(cloudInitConfig CloudInitScriptInput, jinjaConf
 		"preserve_hostname",
 		"hostname",
 		"final_message",
+		"ntp",
 	} {
 		val, ok := mergedCloudInit[key]
 		if !ok {
