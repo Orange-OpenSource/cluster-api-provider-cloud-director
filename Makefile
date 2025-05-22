@@ -202,7 +202,7 @@ release: docker-build docker-push ## Build release images and push to registry.
 
 .PHONY: release-manifests
 release-manifests: kustomize ## Generate release manifests e.g. CRD, RBAC etc.
-	sed -e "s/__VERSION__/$(VERSION)/g" config/manager/manager.yaml.template > config/manager/manager.yaml
+	sed -e "s#__REGISTRY__#$(REGISTRY)#g" -e "s/__CAPVCD_IMG__/$(CAPVCD_IMG)/g" -e "s/__VERSION__/$(VERSION)/g" config/manager/manager.yaml.template > config/manager/manager.yaml
 	$(KUSTOMIZE) build config/default > templates/infrastructure-components.yaml
 
 .PHONY: release-prep
