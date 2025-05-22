@@ -31,9 +31,9 @@ import (
 	"github.com/vmware/go-vcloud-director/v2/types/v56"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/klog"
+	// "k8s.io/klog"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	kcpv1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	// kcpv1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	kcfg "sigs.k8s.io/cluster-api/util/kubeconfig"
@@ -87,10 +87,8 @@ type VCDClusterReconciler struct {
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vcdmachines,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vcdmachines/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vcdmachines/finalizers,verbs=update
-//+kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vcdmachinetemplates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinedeployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigtemplates,verbs=get;list;watch;create;update;patch;delete
 
 func (r *VCDClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, rerr error) {
 	log := ctrl.LoggerFrom(ctx)
@@ -300,26 +298,26 @@ func (r *VCDClusterReconciler) constructCapvcdRDE(ctx context.Context, cluster *
 	if vcdOrg == nil {
 		return nil, fmt.Errorf("org cannot be nil")
 	}
-	kcpList, err := getAllKubeadmControlPlaneForCluster(ctx, r.Client, *cluster)
-	if err != nil {
-		return nil, fmt.Errorf("error getting KubeadmControlPlane objects for cluster [%s]: [%v]", vcdCluster.Name, err)
-	}
+	// kcpList, err := getAllKubeadmControlPlaneForCluster(ctx, r.Client, *cluster)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error getting KubeadmControlPlane objects for cluster [%s]: [%v]", vcdCluster.Name, err)
+	// }
 
 	// we assume that there is only one kcp object for a cluster.
 	// TODO: need to update the logic for multiple kcp objects in the cluster
 	kubernetesVersion := ""
-	for _, kcp := range kcpList.Items {
-		kubernetesVersion = kcp.Spec.Version
-	}
-
-	mdList, err := getAllMachineDeploymentsForCluster(ctx, r.Client, *cluster)
-	if err != nil {
-		return nil, fmt.Errorf("error getting all machine deployment objects for the cluster [%s]: [%v]", vcdCluster.Name, err)
-	}
-	ready, err := hasClusterReconciledToDesiredK8Version(ctx, r.Client, vcdCluster.Name, kcpList, mdList, kubernetesVersion)
-	if err != nil {
-		return nil, fmt.Errorf("error occurred while determining the value for the ready flag for cluster [%s]: [%v]", vcdCluster.Name, err)
-	}
+	// for _, kcp := range kcpList.Items {
+	// 	kubernetesVersion = kcp.Spec.Version
+	// }
+        //
+	// mdList, err := getAllMachineDeploymentsForCluster(ctx, r.Client, *cluster)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error getting all machine deployment objects for the cluster [%s]: [%v]", vcdCluster.Name, err)
+	// }
+	// ready, err := hasClusterReconciledToDesiredK8Version(ctx, r.Client, vcdCluster.Name, kcpList, mdList, kubernetesVersion)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error occurred while determining the value for the ready flag for cluster [%s]: [%v]", vcdCluster.Name, err)
+	// }
 
 	orgList := []rdeType.Org{
 		rdeType.Org{
@@ -384,7 +382,8 @@ func (r *VCDClusterReconciler) constructCapvcdRDE(ctx context.Context, cluster *
 						TkgVersion: getTKGVersion(cluster),
 					},
 					Previous: nil,
-					Ready:    ready,
+					// Ready:    ready,
+					Ready: true,
 				},
 			},
 		},
@@ -443,7 +442,7 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 		return fmt.Errorf("found nil org when getting org by name [%s]", vcdCluster.Spec.Org)
 	}
 	capvcdRdeManager := capisdk.NewCapvcdRdeManager(workloadVCDClient, vcdCluster.Status.InfraId)
-	_, capvcdSpec, capvcdMetadata, capvcdStatus, err := capvcdRdeManager.GetCAPVCDEntity(ctx, vcdCluster.Status.InfraId)
+	_, _, capvcdMetadata, capvcdStatus, err := capvcdRdeManager.GetCAPVCDEntity(ctx, vcdCluster.Status.InfraId)
 	if err != nil {
 		return fmt.Errorf("failed to get RDE with ID [%s] for cluster [%s]: [%v]", vcdCluster.Status.InfraId, vcdCluster.Name, err)
 	}
@@ -464,25 +463,25 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 	}
 
 	specPatch := make(map[string]interface{})
-	kcpList, err := getAllKubeadmControlPlaneForCluster(ctx, r.Client, *cluster)
-	if err != nil {
-		return fmt.Errorf("error getting all KubeadmControlPlane objects for cluster [%s]: [%v]", vcdCluster.Name, err)
-	}
-
-	mdList, err := getAllMachineDeploymentsForCluster(ctx, r.Client, *cluster)
-	if err != nil {
-		return fmt.Errorf("error getting all MachineDeployment objects for cluster [%s]: [%v]", vcdCluster.Name, err)
-	}
-
-	kubernetesSpecVersion := ""
-	var kcpObj *kcpv1.KubeadmControlPlane
-	// we assume that there is only one kcp object for a cluster.
-	// TODO: need to update the logic for multiple kcp objects in the cluster
-	if len(kcpList.Items) > 0 {
-		kcpObj = &kcpList.Items[0]
-		kubernetesSpecVersion = kcpObj.Spec.Version // for RDE updates, consider only the first kcp object
-	}
-	tkgVersion := getTKGVersion(cluster)
+	// kcpList, err := getAllKubeadmControlPlaneForCluster(ctx, r.Client, *cluster)
+	// if err != nil {
+	// 	return fmt.Errorf("error getting all KubeadmControlPlane objects for cluster [%s]: [%v]", vcdCluster.Name, err)
+	// }
+        //
+	// mdList, err := getAllMachineDeploymentsForCluster(ctx, r.Client, *cluster)
+	// if err != nil {
+	// 	return fmt.Errorf("error getting all MachineDeployment objects for cluster [%s]: [%v]", vcdCluster.Name, err)
+	// }
+        //
+	// kubernetesSpecVersion := ""
+	// var kcpObj *kcpv1.KubeadmControlPlane
+	// // we assume that there is only one kcp object for a cluster.
+	// // TODO: need to update the logic for multiple kcp objects in the cluster
+	// if len(kcpList.Items) > 0 {
+	// 	kcpObj = &kcpList.Items[0]
+	// 	kubernetesSpecVersion = kcpObj.Spec.Version // for RDE updates, consider only the first kcp object
+	// }
+	// tkgVersion := getTKGVersion(cluster)
 	crsBindingList, err := getAllCRSBindingForCluster(ctx, r.Client, *cluster)
 	if err != nil {
 		// this is fundamentally not a mandatory field
@@ -490,15 +489,15 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 	}
 
 	// UI can create CAPVCD clusters in future which can populate capiYaml in RDE.Spec, so we only want to populate if capiYaml is empty
-	if capvcdSpec.CapiYaml == "" {
-		capiYaml, err := getCapiYaml(ctx, r.Client, *cluster, *vcdCluster)
-		if err != nil {
-			log.Error(err,
-				"error during RDE reconciliation: failed to construct capi yaml from kubernetes resources of cluster")
-		} else {
-			specPatch["CapiYaml"] = capiYaml
-		}
-	}
+	// if capvcdSpec.CapiYaml == "" {
+	// 	capiYaml, err := getCapiYaml(ctx, r.Client, *cluster, *vcdCluster)
+	// 	if err != nil {
+	// 		log.Error(err,
+	// 			"error during RDE reconciliation: failed to construct capi yaml from kubernetes resources of cluster")
+	// 	} else {
+	// 		specPatch["CapiYaml"] = capiYaml
+	// 	}
+	// }
 
 	// Updating status portion of the RDE in the following code
 	capvcdStatusPatch := make(map[string]interface{})
@@ -507,35 +506,35 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 	}
 
 	upgradeObject := capvcdStatus.Upgrade
-	var ready bool
-	ready, err = hasClusterReconciledToDesiredK8Version(ctx, r.Client, vcdCluster.Name, kcpList, mdList, kubernetesSpecVersion)
-	if err != nil {
-		return fmt.Errorf("failed to determine the value for ready flag for upgrades for cluster [%s(%s)]: [%v]",
-			vcdCluster.Name, vcdCluster.Status.InfraId, err)
-	}
-
-	if kcpObj != nil {
-		if upgradeObject.Current == nil {
-			upgradeObject = rdeType.Upgrade{
-				Current: &rdeType.K8sInfo{
-					K8sVersion: kubernetesSpecVersion,
-					TkgVersion: tkgVersion,
-				},
-				Previous: nil,
-				Ready:    ready,
-			}
-		} else {
-			if kcpObj.Spec.Version != capvcdStatus.Upgrade.Current.K8sVersion {
-
-				upgradeObject.Previous = upgradeObject.Current
-				upgradeObject.Current = &rdeType.K8sInfo{
-					K8sVersion: kubernetesSpecVersion,
-					TkgVersion: tkgVersion,
-				}
-			}
-			upgradeObject.Ready = ready
-		}
-	}
+	// var ready bool
+	// ready, err = hasClusterReconciledToDesiredK8Version(ctx, r.Client, vcdCluster.Name, kcpList, mdList, kubernetesSpecVersion)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to determine the value for ready flag for upgrades for cluster [%s(%s)]: [%v]",
+	// 		vcdCluster.Name, vcdCluster.Status.InfraId, err)
+	// }
+        //
+	// if kcpObj != nil {
+	// 	if upgradeObject.Current == nil {
+	// 		upgradeObject = rdeType.Upgrade{
+	// 			Current: &rdeType.K8sInfo{
+	// 				K8sVersion: kubernetesSpecVersion,
+	// 				TkgVersion: tkgVersion,
+	// 			},
+	// 			Previous: nil,
+	// 			Ready:    ready,
+	// 		}
+	// 	} else {
+	// 		if kcpObj.Spec.Version != capvcdStatus.Upgrade.Current.K8sVersion {
+        //
+	// 			upgradeObject.Previous = upgradeObject.Current
+	// 			upgradeObject.Current = &rdeType.K8sInfo{
+	// 				K8sVersion: kubernetesSpecVersion,
+	// 				TkgVersion: tkgVersion,
+	// 			}
+	// 		}
+	// 		upgradeObject.Ready = ready
+	// 	}
+	// }
 
 	log.V(4).Info("upgrade section of the RDE", "previous", capvcdStatus.Upgrade, "current", upgradeObject)
 
@@ -544,9 +543,9 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 	}
 
 	// TODO: Delete "kubernetes" string in RDE. Discuss with Sahithi
-	if capvcdStatus.Kubernetes != kubernetesSpecVersion {
-		capvcdStatusPatch["Kubernetes"] = kubernetesSpecVersion
-	}
+	// if capvcdStatus.Kubernetes != kubernetesSpecVersion {
+	// 	capvcdStatusPatch["Kubernetes"] = kubernetesSpecVersion
+	// }
 
 	if capvcdStatus.Uid != vcdCluster.Status.InfraId {
 		capvcdStatusPatch["Uid"] = vcdCluster.Status.InfraId
@@ -561,13 +560,13 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 		capvcdStatusPatch["UseAsManagementCluster"] = vcdCluster.Status.UseAsManagementCluster
 	}
 	// fill CAPIStatusYaml
-	capiStatusYaml, err := getCapiStatusYaml(ctx, r.Client, *cluster, *vcdCluster)
-	if err != nil {
-		log.Error(err, "failed to populate capiStatusYaml in RDE", "rdeID", vcdCluster.Status.InfraId)
-	}
-	if capvcdStatus.CapiStatusYaml != capiStatusYaml {
-		capvcdStatusPatch["CapiStatusYaml"] = capiStatusYaml
-	}
+	// capiStatusYaml, err := getCapiStatusYaml(ctx, r.Client, *cluster, *vcdCluster)
+	// if err != nil {
+	// 	log.Error(err, "failed to populate capiStatusYaml in RDE", "rdeID", vcdCluster.Status.InfraId)
+	// }
+	// if capvcdStatus.CapiStatusYaml != capiStatusYaml {
+	// 	capvcdStatusPatch["CapiStatusYaml"] = capiStatusYaml
+	// }
 
 	pods := rdeType.Pods{
 		CidrBlocks: cluster.Spec.ClusterNetwork.Pods.CIDRBlocks,
@@ -628,13 +627,13 @@ func (r *VCDClusterReconciler) reconcileRDE(ctx context.Context, cluster *cluste
 	}
 
 	// update node status. Needed to remove stray nodes which were already deleted
-	nodePoolList, err := getNodePoolList(ctx, r.Client, *cluster)
-	if err != nil {
-		klog.Errorf("failed to get node pool list from cluster [%s]: [%v]", cluster.Name, err)
-	}
-	if !reflect.DeepEqual(nodePoolList, capvcdStatus.NodePool) {
-		capvcdStatusPatch["NodePool"] = nodePoolList
-	}
+	// nodePoolList, err := getNodePoolList(ctx, r.Client, *cluster)
+	// if err != nil {
+	// 	klog.Errorf("failed to get node pool list from cluster [%s]: [%v]", cluster.Name, err)
+	// }
+	// if !reflect.DeepEqual(nodePoolList, capvcdStatus.NodePool) {
+	// 	capvcdStatusPatch["NodePool"] = nodePoolList
+	// }
 
 	ovdcList := []rdeType.Ovdc{
 		rdeType.Ovdc{

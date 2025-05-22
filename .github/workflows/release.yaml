@@ -31,9 +31,6 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Apply Orange patch
-      run: |
-        cp -ar patches/* .
     - name: Log in to registry
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 

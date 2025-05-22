@@ -12,6 +12,7 @@ import (
 	b64 "encoding/base64"
 	"fmt"
 	"math"
+	"net"
 	"reflect"
 	"strconv"
 	"strings"
@@ -64,6 +65,17 @@ type CloudInitScriptInput struct {
 	ClusterID           string // cluster id
 }
 
+type IgnitionNetworkInitScriptSectionInput struct {
+	Primary     bool
+	Network     string
+	IPAddress   string
+	MACAddress  string
+	NetmaskCidr int
+	Gateway     string
+	DNS1        string
+	DNS2        string
+}
+
 const (
 	ReclaimPolicyDelete = "Delete"
 	ReclaimPolicyRetain = "Retain"
@@ -78,6 +90,9 @@ const Mebibyte = 1048576
 //
 //go:embed cluster_scripts/cloud_init.tmpl
 var cloudInitScriptTemplate string
+
+//go:embed cluster_scripts/cloud_init_network_configuration.tmpl
+var CloudInitNetworkInitScriptTemplate string
 
 // VCDMachineReconciler reconciles a VCDMachine object
 type VCDMachineReconciler struct {
@@ -206,11 +221,11 @@ func patchVCDMachine(ctx context.Context, patchHelper *patch.Helper, vcdMachine 
 }
 
 const (
-	NetworkConfiguration                   = "guestinfo.postcustomization.networkconfiguration.status"
-	ProxyConfiguration                     = "guestinfo.postcustomization.proxy.setting.status"
-	MeteringConfiguration                  = "guestinfo.metering.status"
-	KubeadmInit                            = "guestinfo.postcustomization.kubeinit.status"
-	KubeadmNodeJoin                        = "guestinfo.postcustomization.kubeadm.node.join.status"
+	NetworkConfiguration  = "guestinfo.postcustomization.networkconfiguration.status"
+	ProxyConfiguration    = "guestinfo.postcustomization.proxy.setting.status"
+	MeteringConfiguration = "guestinfo.metering.status"
+	// KubeadmInit                            = "guestinfo.postcustomization.kubeinit.status"
+	// KubeadmNodeJoin                        = "guestinfo.postcustomization.kubeadm.node.join.status"
 	PostCustomizationScriptExecutionStatus = "guestinfo.post_customization_script_execution_status"
 	PostCustomizationScriptFailureReason   = "guestinfo.post_customization_script_execution_failure_reason"
 )
@@ -474,12 +489,11 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 	// run `kubeadm join`. The joining control planes run `kubeadm join`, so these nodes use the join script.
 	// Although it is sufficient to just check if `kubeadm join` is in the bootstrap script, using the
 	// isControlPlaneMachine function is a simpler operation, so this function is called first.
-	useControlPlaneScript := util.IsControlPlaneMachine(machine) &&
-		!strings.Contains(bootstrapJinjaScript, "kubeadm join")
+	useControlPlaneScript := util.IsControlPlaneMachine(machine) // && !strings.Contains(bootstrapJinjaScript, "kubeadm join")
 
 	// Scaling up Control Plane initially creates the nodes as worker, which eventually joins the original control plane
 	// Hence we are checking if it contains the control plane label and has kubeadm join in the script
-	isResizedControlPlane := util.IsControlPlaneMachine(machine) && strings.Contains(bootstrapJinjaScript, "kubeadm join")
+	isResizedControlPlane := util.IsControlPlaneMachine(machine) // && strings.Contains(bootstrapJinjaScript, "kubeadm join")
 
 	// Construct a CloudInitScriptInput struct to pass into template.Execute() function to generate the necessary
 	// cloud init script for the relevant node type, i.e. control plane or worker node
@@ -753,10 +767,13 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 	if vmStatus != "POWERED_ON" {
 		// try to power on the VM
 		b64CloudInitScript := b64.StdEncoding.EncodeToString(mergedCloudInitBytes)
+		b64NetworkMetadata, err := generateNetworkInitializationScriptForCloudInitB64(vm.VM.NetworkConnectionSection, vdcManager)
 		keyVals := map[string]string{
 			"guestinfo.userdata":          b64CloudInitScript,
 			"guestinfo.userdata.encoding": "base64",
 			"disk.enableUUID":             "1",
+			"guestinfo.metadata":          b64NetworkMetadata,
+			"guestinfo.metadata.encoding": "base64",
 		}
 
 		for key, val := range keyVals {
@@ -834,40 +851,40 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 		log.Error(err, "failed to remove VCDMachineCreationError from RDE", "rdeID", vcdCluster.Status.InfraId)
 	}
 
-	phases := postCustPhases
-	if useControlPlaneScript {
-		phases = append(phases, KubeadmInit)
-	} else {
-		phases = append(phases, KubeadmNodeJoin)
-	}
+	// phases := postCustPhases
+	// // if useControlPlaneScript {
+	// // 	phases = append(phases, KubeadmInit)
+	// // } else {
+	// // 	phases = append(phases, KubeadmNodeJoin)
+	// // }
 
-	if vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy == "" &&
-		vcdCluster.Spec.ProxyConfigSpec.HTTPProxy == "" {
-		phases = removeFromSlice(ProxyConfiguration, phases)
-	}
+	// if vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy == "" &&
+	// 	vcdCluster.Spec.ProxyConfigSpec.HTTPProxy == "" {
+	// 	phases = removeFromSlice(ProxyConfiguration, phases)
+	// }
 
-	for _, phase := range phases {
-		if err = vApp.Refresh(); err != nil {
-			err1 := capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
-			if err1 != nil {
-				log.Error(err1, "failed to add VCDMachineScriptExecutionError into RDE", "rdeID", vcdCluster.Status.InfraId)
-			}
-			return ctrl.Result{},
-				errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to refresh vapp",
-					vAppName, vm.VM.Name)
-		}
-		log.Info(fmt.Sprintf("Start: waiting for the bootstrapping phase [%s] to complete", phase))
-		if err = r.waitForPostCustomizationPhase(ctx, workloadVCDClient, vm, phase); err != nil {
-			log.Error(err, fmt.Sprintf("Error waiting for the bootstrapping phase [%s] to complete", phase))
-			err1 := capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
-			if err1 != nil {
-				log.Error(err1, "failed to add VCDMachineScriptExecutionError into RDE", "rdeID", vcdCluster.Status.InfraId)
-			}
-			return ctrl.Result{}, errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to wait for post customization phase [%s]",
-				vAppName, vm.VM.Name, phase)
-		}
-		log.Info(fmt.Sprintf("End: waiting for the bootstrapping phase [%s] to complete", phase))
-	}
+	// for _, phase := range phases {
+	// 	if err = vApp.Refresh(); err != nil {
+	// 		err1 := capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
+	// 		if err1 != nil {
+	// 			log.Error(err1, "failed to add VCDMachineScriptExecutionError into RDE", "rdeID", vcdCluster.Status.InfraId)
+	// 		}
+	// 		return ctrl.Result{},
+	// 			errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to refresh vapp",
+	// 				vAppName, vm.VM.Name)
+	// 	}
+	// 	log.Info(fmt.Sprintf("Start: waiting for the bootstrapping phase [%s] to complete", phase))
+	// 	if err = r.waitForPostCustomizationPhase(ctx, workloadVCDClient, vm, phase); err != nil {
+	// 		log.Error(err, fmt.Sprintf("Error waiting for the bootstrapping phase [%s] to complete", phase))
+	// 		err1 := capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
+	// 		if err1 != nil {
+	// 			log.Error(err1, "failed to add VCDMachineScriptExecutionError into RDE", "rdeID", vcdCluster.Status.InfraId)
+	// 		}
+	// 		return ctrl.Result{}, errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to wait for post customization phase [%s]",
+	// 			vAppName, vm.VM.Name, phase)
+	// 	}
+	// 	log.Info(fmt.Sprintf("End: waiting for the bootstrapping phase [%s] to complete", phase))
+	// }
 
 	err = capvcdRdeManager.RdeManager.RemoveErrorByNameOrIdFromErrorSet(ctx, vcdsdk.ComponentCAPVCD, capisdk.VCDMachineScriptExecutionError, "", "")
 	if err != nil {
@@ -1559,6 +1576,7 @@ func MergeJinjaToCloudInitScript(cloudInitConfig CloudInitScriptInput, jinjaConf
 		"preserve_hostname",
 		"hostname",
 		"final_message",
+		"ntp",
 	} {
 		val, ok := mergedCloudInit[key]
 		if !ok {
@@ -1577,4 +1595,47 @@ func MergeJinjaToCloudInitScript(cloudInitConfig CloudInitScriptInput, jinjaConf
 	}
 
 	return out, nil
+}
+
+// generateNetworkInitializationScriptForCloudInitB64 creates the bash script that will create the networkd units stored in metadata
+// and consumed by cloudinit
+func generateNetworkInitializationScriptForCloudInitB64(networkConnection *types.NetworkConnectionSection, vdcManager *vcdsdk.VdcManager) (string, error) {
+	CloudInitNetworkInitTemplate, err := template.New("cloud_init_network_init_script_template").Parse(CloudInitNetworkInitScriptTemplate)
+	if err != nil {
+		return "", errors.Wrapf(err, "Error parsing CloudInitNetworkInitScriptTemplate [%s]", CloudInitNetworkInitScriptTemplate)
+	}
+
+	var sectionInputConfigs []IgnitionNetworkInitScriptSectionInput
+	for _, network := range networkConnection.NetworkConnection {
+		// Process NIC network properties and subnet CIDR
+		orgVdcNetwork, err := vdcManager.Vdc.GetOrgVdcNetworkByName(network.Network, true)
+		if err != nil {
+			return "", err
+		}
+
+		ipScope := orgVdcNetwork.OrgVDCNetwork.Configuration.IPScopes.IPScope[0]
+		netmask := net.ParseIP(ipScope.Netmask)
+		netmaskCidr, _ := net.IPMask(netmask.To4()).Size()
+
+		sectionInputConfigs = append(sectionInputConfigs, IgnitionNetworkInitScriptSectionInput{
+			Primary:     network.NetworkConnectionIndex == networkConnection.PrimaryNetworkConnectionIndex,
+			Network:     network.Network,
+			IPAddress:   network.IPAddress,
+			MACAddress:  network.MACAddress,
+			NetmaskCidr: netmaskCidr,
+			Gateway:     ipScope.Gateway,
+			DNS1:        ipScope.DNS1,
+			DNS2:        ipScope.DNS2,
+		})
+	}
+
+	buff := bytes.Buffer{}
+	if err = CloudInitNetworkInitTemplate.Execute(&buff, sectionInputConfigs); err != nil {
+		return "", errors.Wrapf(err, "Error rendering Cloud init network init template: [%s]", CloudInitNetworkInitTemplate.Name())
+	}
+
+	networkMetadata := buff.String() // Assuming this is the string you want to encode
+	encoded := b64.StdEncoding.EncodeToString([]byte(networkMetadata))
+
+	return encoded, nil
 }

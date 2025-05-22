@@ -1,0 +1,25 @@
+network:
+  version: 1
+  config:
+    {{- range $section := . }}
+    - type: physical
+      name: {{$section.Network}}
+      mac_address: {{$section.MACAddress}}
+      subnets:
+        - type: static
+          address: {{$section.IPAddress}}/{{$section.NetmaskCidr}}
+          dns_nameservers:
+            {{- if $section.DNS1 }}
+            - {{ $section.DNS1 }}
+            {{- end -}}
+            {{- if $section.DNS2  }}
+            - {{ $section.DNS2  }}
+            {{- end -}}
+          {{- if eq $section.Primary true }}
+          gateway: {{ $section.Gateway }}
+          routes:
+            - gateway: {{$section.Gateway}}
+              destination: "0.0.0.0"
+              netmask: "0"
+          {{- end }}
+    {{- end -}}

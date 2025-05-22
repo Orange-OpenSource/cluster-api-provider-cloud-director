@@ -1,0 +1,16 @@
+{
+  "name": "capvcd",
+  "config": {
+    "image": "projects.packages.broadcom.com/vmware-cloud-director/cluster-api-provider-cloud-director",
+    "live_reload_deps": [
+      "main.go",
+      "go.mod",
+      "go.sum",
+      "api",
+      "cloud",
+      "controllers",
+      "exp"
+    ],
+    "label": "CAPVCD"
+  }
+}

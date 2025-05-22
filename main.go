@@ -24,7 +24,8 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog"
 	clusterv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	bootstrapv1beta1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+
+	// bootstrapv1beta1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	addonsv1 "sigs.k8s.io/cluster-api/exp/addons/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/flags"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -36,7 +37,7 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	kcpv1beta1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	// kcpv1beta1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -48,6 +49,7 @@ var (
 
 	enableLeaderElection bool
 	probeAddr            string
+	profilerAddress      string
 	syncPeriod           time.Duration
 	concurrency          int
 	diagnosticsOptions   flags.DiagnosticsOptions
@@ -62,14 +64,15 @@ func init() {
 	// core CAPI objects using v1beta1 using the available webhook conversion. Hence, v1beta1 support in core CAPI is
 	// mandatory.
 	utilruntime.Must(clusterv1beta1.AddToScheme(myscheme))
-	utilruntime.Must(kcpv1beta1.AddToScheme(myscheme))
-	utilruntime.Must(bootstrapv1beta1.AddToScheme(myscheme))
+	// utilruntime.Must(kcpv1beta1.AddToScheme(myscheme))
+	// utilruntime.Must(bootstrapv1beta1.AddToScheme(myscheme))
 	// We need the addonsv1 scheme in order to list the ClusterResourceSetBindings addon.
 	utilruntime.Must(addonsv1.AddToScheme(myscheme))
 }
 
 func initFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	fs.StringVar(&profilerAddress, "profiler-address", ":6060", "Bind address to expose the pprof profiler (e.g. localhost:6060)")
 	fs.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -105,6 +108,7 @@ func main() {
 		Scheme:                 myscheme,
 		Metrics:                flags.GetDiagnosticsOptions(diagnosticsOptions),
 		HealthProbeBindAddress: probeAddr,
+		PprofBindAddress:       profilerAddress,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "capvcd-controller-manager-leader-election",
 		Cache: cache.Options{

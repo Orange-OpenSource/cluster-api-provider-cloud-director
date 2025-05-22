@@ -14,7 +14,7 @@ const (
 	VCDCluster                  = "VCDCluster"
 	MachineDeployment           = "MachineDeployment"
 	Cluster                     = "Cluster"
-	KubeadmControlPlane         = "KubeadmControlPlane"
+	// KubeadmControlPlane         = "KubeadmControlPlane"
 	VCDMachineTemplate          = "VCDMachineTemplate"
 	SECRET                      = "Secret"
 	etcdServerRequestTimeoutErr = "etcdserver: request timed out"
